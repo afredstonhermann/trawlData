@@ -1,0 +1,281 @@
+---
+title: "AFH"
+author: "AFH"
+date: "September 9, 2016"
+output: html_document
+---
+
+# Analyzing and using North American trawl data
+
+## Objectives
+
+Malin found a strong correlation between taxon shift and thermal shift in marine ectotherms based on this North American trawl data. My research focuses on non-climate drivers of species distributions, particularly for range-shifting species in the Anthropocene. 
+
+Objective 1: Identify the species with the greatest mismatch between taxon shift and thermal shift - i.e. which species are moving vastly slower or faster than climate change? 
+
+### trawlData package setup
+
+```{r trawlData setup and package loading}
+# install.packages('devtools')
+# library(devtools) # note that trawlData is not on CRAN and cannot be installed with install.packages('trawlData')
+# setwd('Users/alexa/github/trawlData') # can replace with pathname to any working directory 
+# devtools::install(update_packages=FALSE) # will install package 
+# install.packages('maptools')
+# install.packages('Hmisc')
+# install.packages('geosphere')
+
+library(trawlData)
+ls("package:trawlData") # lists all functions in package 
+
+# the following packages are required to run the full OceanAdapt analysis of taxon shifts, with comments lifted from that code as well: 
+library(data.table) # much of this code could be sped up by converting to data.tables
+library(PBSmapping) # for calculating stratum areas
+library(maptools) # for calculating stratum areas
+library(Hmisc)
+require(stringr) # allow 'STRATA' to be extracted from 'STATIONCODE' with seus
+require(lubridate) # for manipulating 'DATE' and extracting 'SEASON' with sues
+require(zoo) # allows 'SEASON' to be extracted from 'DATE' with seus
+
+# Alexa likes the following packages: 
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+
+# These packages are required by Malin's code:
+library(geosphere)
+
+setwd('~/github/trawlData') # or current directory 
+# Some of these packages tend to vanish from R and need to be reinstalled, so be sure to scroll through the console and check they all loaded properly. 
+
+```
+
+## Part 1: Calculate taxon shifts
+
+First, I'm going to load all of the clean data from trawlData. Note that this code chunk takes approximately 3 minutes to run on my MBA. 
+
+``` {r load .Rdata files}
+load("~/github/trawlData/data/clean.ai.RData") # Aleutian Islands
+load("~/github/trawlData/data/clean.ebs.RData") # Eastern Bering Sea
+load("~/github/trawlData/data/clean.gmex.RData") # Gulf of Mexico
+load("~/github/trawlData/data/clean.goa.RData") # Gulf of Alaska
+load("~/github/trawlData/data/clean.neus.RData") # Northeast US
+load("~/github/trawlData/data/clean.sa.RData") # South Atlantic
+load("~/github/trawlData/data/clean.shelf.RData") # Scotian Shelf
+load("~/github/trawlData/data/clean.wcann.RData") # West Coast (annual survey)
+load("~/github/trawlData/data/clean.wctri.RData") # West Coast (triennial survey) 
+```
+
+The following code is adapted from Malin's `Range shift LH 2016-06-07.R` code. He used datasets saved on his hard drive as .csv files, so the file names and data formats may be a little different. As a convert to dplyr and a novice at base R, I've also converted a lot of the data manipulation into dplyr. 
+
+``` {r explore data}
+
+all(colnames(clean.ai) == colnames(clean.ebs)) # TRUE - these have matching columns 
+
+length(colnames(clean.gmex)) # 77
+length(colnames(clean.ebs)) # 49 
+# these two, um, don't match. What's missing from .ebs? 
+setdiff(colnames(clean.gmex),colnames(clean.ebs)) 
+setdiff(colnames(clean.ebs),colnames(clean.gmex)) #.gmex is only missing 'haul' 
+
+length(colnames(clean.goa)) #49
+all(colnames(clean.goa) == colnames(clean.ebs)) # TRUE; .ai, .ebs, and .goa match so far
+
+length(colnames(clean.neus)) # 57
+setdiff(colnames(clean.ai),colnames(clean.neus)) # .neus is only missing 'haul' 
+setdiff(colnames(clean.neus),colnames(clean.ai)) 
+
+length(colnames(clean.sa)) # 100! SO MUCH DATAAA
+setdiff(colnames(clean.ai),colnames(clean.sa)) # .sa is missing 'station', 'SID', 'cruise', and 'haul'
+
+length(colnames(clean.shelf)) # 77 
+setdiff(colnames(clean.ai),colnames(clean.shelf)) # .shelf is missing "station" "SID"     "vessel"  "cruise"  "haul" 
+
+length(colnames(clean.wcann)) # 56
+setdiff(colnames(clean.ai),colnames(clean.wcann)) # .wcann is missing "station" "SID"     "stemp"   "cruise"  "haul"
+
+length(colnames(clean.wctri)) # 81
+setdiff(colnames(clean.ai),colnames(clean.wctri)) # .wctri is not missing anything that's in .ai! 
+setdiff(colnames(clean.wctri),colnames(clean.ai)) 
+
+col.matching <- Reduce(intersect, list(colnames(clean.ai),colnames(clean.ebs),colnames(clean.gmex),colnames(clean.goa),colnames(clean.neus),colnames(clean.sa),colnames(clean.shelf),colnames(clean.wcann),colnames(clean.wctri))) # generate a list (or vector?) of all the column names that intersect between the nine datasets. 
+
+match.ai <- clean.ai %>% 
+  select(one_of(col.matching)) # this creates a new df for .ai with just the columns that are shared across all datasets 
+colnames(match.ai) # just to check! 
+
+match.ebs <- clean.ebs %>% 
+  select(one_of(col.matching))
+
+match.gmex <- clean.gmex %>% 
+  select(one_of(col.matching))
+
+match.goa <- clean.goa %>% 
+  select(one_of(col.matching))
+
+match.neus <- clean.neus %>% 
+  select(one_of(col.matching))
+
+match.sa <- clean.sa %>% 
+  select(one_of(col.matching))
+
+match.shelf <- clean.shelf %>% 
+  select(one_of(col.matching))
+
+match.wcann <- clean.wcann %>% 
+  select(one_of(col.matching))
+
+match.wctri <- clean.wctri %>% 
+  select(one_of(col.matching))
+
+alldata <- tbl_df(rbind(match.ai, match.ebs, match.gmex, match.goa, match.neus, match.sa, match.shelf, match.wcann, match.wctri)) # this is slow, and generates a df with 4,797,881 rows.
+
+alldata[1:5,] # exploring just the first five rows of this dataset shows a number of rows with NA in most of the columns. in 'trawlData-overview.Rmd', it is noted that the 'keep.row' column was added to instruct users of this dataset whether the curators recommend keeping the data for analysis or not. Let's try dropping those rows, and see if that removes all the NA rows. 
+
+alldata <- alldata %>% 
+  filter(keep.row == 'TRUE') # alldata now has 2,598,992 rows, meaning that 2,198,889 were removed for data quality reasons.  
+
+alldata[1:5,]
+
+```
+
+Above, we find that `clean.ai`, `clean.ebs`, and `clean.goa` have 49 columns that match perfectly. The other six datasets all have more information, but (excepting `clean.wctri`) they are all missing at least one column in the 49 shared by `clean.ai`, `clean.ebs`, and `clean.goa`. `col.matching` contains all the columns that are shared among the nine datasets. 
+
+To track Malin's original code as closely as possible, I've eliminated the rows that are not shared by all dataframes and created new `match.` dataframes. 
+
+``` { eliminate intermediates that make my computer slow}
+
+rm(c())
+
+```
+
+Skipping the chunk of Malin's code that produces maps and figures, the next step in his data analysis was to identify the taxa that were represented sufficiently in the data for calculations. 
+
+NOTE 9.27.16: *do not run this chunk!* I can't tell which of the filtering in Malin's original code was already done in the clean._ files. I'll check in with Ryan about what may or may not need to be left in here, but for now assume that all the species in alldata are worth analyzing and skip to the next chunk. 
+
+``` {r exploring and filtering - lines 176-237 of Malin's code}
+colnames(alldata) # there is a column called 'spp', one called 'species', and one called 'genus'. What's the difference? 
+
+alldata[1:5,'spp']
+alldata[1:5,'species']
+# do these columns ever NOT match? 
+
+test <- alldata %>% 
+  filter(spp != species)
+test[99:120,'spp']
+test[99:120,'species']
+# from exploring this a little bit, we see that 'spp' and 'species' are different taxonomic versions of the same species name. I'm going to use the 'species' column from now on, because it looks like 'spp' has subspecies which I'd rather not separate out. 
+
+# Here, rather than try to replicate Malin's code exactly, I'm going to try to produce the same outputs with different data manipulation approaches. 
+
+# How many unique species are there in this dataset? 
+
+unique.species <- unique(data$species)
+length(unique.species) #2621 species 
+
+# What's the MAXIMUM number of years any region was sampled? 
+
+num.years <- alldata %>% 
+  group_by(reg) %>% 
+  summarise(n_distinct(year))
+# this creates a small dataframe with just the list of 9 regions and the number of distinct years the region was sampled. This ranges from 48 (neus) to 12 (ai, wcann) and 10 (wctri). 
+
+# Next, I want to subset the data to contain only SPECIES THAT ARE PRESENT IN EVERY YEAR THE REGION WAS SAMPLED, FOR EACH REGION. So we want to subset the dataframe for rows where unique(year) for the species matches unique(year) for the region. 
+
+# This was a thorny dplyr problem that ended in a stack overflow question answered by @aichao and @TClavelle. Thanks, anonymous computer scientists! http://stackoverflow.com/questions/39649533/subsetting-dataframe-by-multiple-row-and-column-matches-using-dplyr
+
+#TClavelle's solution
+data.test <- alldata %>%
+  mutate(ids = paste(reg, species, sep=' ')) 
+
+data.test.2 <- data.test %>% 
+  group_by(reg) %>% 
+  mutate(n_yrs = length(unique(year))) %>% 
+  group_by(reg, ids) %>%
+  summarise(present_yrs = length(unique(year)),
+            all_yrs = mean(n_yrs, na.rm = T)) %>%
+  group_by(ids) %>%            
+  filter(present_yrs == all_yrs) %>%
+  ungroup()
+
+filter(data.test, ids %in% data.test.2$ids)
+length(unique(data.test$species))
+
+data.test %>%
+  group_by(reg) %>%
+  summarize(n_sps = n_distinct(species))
+
+# This solution does not filter out any species. However, I think that's because they were filtered out of the dataset already! I'll ask Ryan Batt. 
+
+# How many species were present at least ten times per year? 
+
+```
+
+Next, we want to explore the data a little more, and generate some summary plots and statistics to understand what we have. 
+
+``` {r calculate basic summary statistics - Malin's code lines 239-?}
+
+# Make a histogram of tow abundances for each species in each region - the for loop below is directly adapted from Malin's code: 
+
+# WARNING! If you run this, it will print a histogram for every species + region combo. Run with caution. 
+quartz(width = 10, height = 8)
+regs = sort(unique(alldata$reg))
+	mn = numeric(0)
+	for(k in 1:length(regs)){ # for each region
+		indreg = alldata$reg == regs[k] # 
+		species = sort(unique(alldata$species[indreg]))
+		par(mfrow = c(6,6), mai=c(0.3, 0.3, 0.2, 0.05), cex.main=0.7, cex.axis=0.8)
+		for(i in 1:length(species)){ # for each spp in this region
+			print(paste(regs[k], species[i]))
+			dat = alldata$wtcpue[alldata$reg==regs[k] & alldata$species == species[i] & alldata$wtcpue>0]			
+			hist(dat, col='grey', breaks=30, main=paste(species[i], regs[k], sep='\n'))
+			mn = c(mn, mean(dat))
+#			sk = c(sk,skew(dat))
+		}
+	}
+	
+	dev.off()
+
+# Feed results of those histograms into a dataframe? *** ALEXA NOTE: I DON'T KNOW WHAT THIS CODE DOES, OR WHAT TO DO WITH THE HISTOGRAMS...
+	
+	require(Hmisc)
+	require(isotone)
+
+# Generate a list of all species + region combinations (note that Tyler does this above more elegantly with dplyr, but this is a list, not a df)
+
+	taxlist = alldata[!duplicated(data[,c('reg', 'species')]), c('reg', 'species')]
+		taxlist$regspecies = paste(taxlist$reg, taxlist$species, sep='_') # unique ID for each region/spp combination
+		dim(taxlist) # Malin found 721. On 9/27/16 I found 5206. Hmmmmm ... 
+		length(unique(taxlist$regspecies)) # Malin found 721. On 9/27/16 I found 5206. Hmmmmm ... 
+
+# How many tows are captured in this data?
+length(unique(alldata$haulid)) # 80304
+
+# The code below is also adapted directly from Malin's, lines 257-269. He used a 'goodhauls' df, but in keeping with the rest of this code, I'm assuming that everything in the clean._ trawlData files (once I removed the keep.row = FALSE rows) is a "good haul". 
+
+# MALIN: Area surveyed
+regions <- unique(alldata$reg)
+require(geosphere)
+areas = rep(NA, length(regions))
+for(i in 1:length(regions)){
+	j = alldata$reg == regions[i]
+	bd = chull(alldata$lat[j], alldata$lon[j]) # MALIN: the convex hull bounds # Alexa note: as far as I can tell, this is describing the outer bounds of a convex hull shapes for all the points in each region? 
+	lonlat = alldata[j,c('lon', 'lat')][bd,] # I don't really understand what this is ... why are there 15 rows, not 9?  
+	lonlat$lon[lonlat$lon < -180] = lonlat$lon[lonlat$lon < -180] + 360 # MALIN: areaPolygon doesn't like lon < -180 
+	areas[i] = areaPolygon(lonlat)	
+} 
+# this is calculating the area of that convex hull 
+areas = data.frame(reg = regions, areakm2 = areas/1000^2)
+areas
+	sum(areas$areakm2) # Malin got 3,339,354 km2 (convex hull approach). I got 4,716,696. 
+
+# Depths 
+summary(alldata$depth) # min 2.5m, max 1975m, mean 118.1m, median 80m. Malin found: 4 to 3304 m, mean 125m. 
+
+# Abundances 
+# REVISIT THIS ONCE I CHECK WITH RYAN WHETHER cntcpue = number of individuals
+
+# Skipping the exploration of taxonomic resolution, number of species occurrences / year, etc., because I think a lot of the species that fail this test were filtered out of trawlData. 
+
+
+```
+
