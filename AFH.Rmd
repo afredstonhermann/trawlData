@@ -67,7 +67,7 @@ load("~/github/trawlData/data/clean.wctri.RData") # West Coast (triennial survey
 
 The following code is adapted from Malin's `Range shift LH 2016-06-07.R` code. He used datasets saved on his hard drive as .csv files, so the file names and data formats may be a little different. As a convert to dplyr and a novice at base R, I've also converted a lot of the data manipulation into dplyr. 
 
-``` {r explore data}
+``` {r explore columns and combine dataframes}
 
 all(colnames(clean.ai) == colnames(clean.ebs)) # TRUE - these have matching columns 
 
@@ -136,17 +136,16 @@ alldata <- alldata %>%
 
 alldata[1:5,]
 
+# At this stage, we can remove the intermediates clean._ and match._ that are redundant with alldata. 
+
+rm(list = c('clean.ai', 'clean.ebs', 'clean.gmex', 'clean.goa', 'clean.neus', 'clean.sa', 'clean.shelf', 'clean.wcann', 'clean.wctri'))
+rm(list = c('match.ai','match.ebs','match.gmex','match.goa','match.neus','match.sa','match.shelf','match.wcann','match.wctri'))
+
 ```
 
 Above, we find that `clean.ai`, `clean.ebs`, and `clean.goa` have 49 columns that match perfectly. The other six datasets all have more information, but (excepting `clean.wctri`) they are all missing at least one column in the 49 shared by `clean.ai`, `clean.ebs`, and `clean.goa`. `col.matching` contains all the columns that are shared among the nine datasets. 
 
 To track Malin's original code as closely as possible, I've eliminated the rows that are not shared by all dataframes and created new `match.` dataframes. 
-
-``` { eliminate intermediates that make my computer slow}
-
-rm(c())
-
-```
 
 Skipping the chunk of Malin's code that produces maps and figures, the next step in his data analysis was to identify the taxa that were represented sufficiently in the data for calculations. 
 
@@ -274,8 +273,144 @@ summary(alldata$depth) # min 2.5m, max 1975m, mean 118.1m, median 80m. Malin fou
 # Abundances 
 # REVISIT THIS ONCE I CHECK WITH RYAN WHETHER cntcpue = number of individuals
 
+# Number of taxa present >10x/year
+# ???????????
+
+
+
 # Skipping the exploration of taxonomic resolution, number of species occurrences / year, etc., because I think a lot of the species that fail this test were filtered out of trawlData. 
+
+```
+
+I'm largely skipping lines 300-450, which deal with a lot of data exploration and df subsetting I'm hoping to streamline with dplyr. I'm picking Malin's code back up where he starts to tackle calculating range shifts. Before doing so, there are several necessary preparations: parsing the datetime column into a numeric format, and initializing all the functions Malin wrote for this analysis.  
+
+``` {r datetime and functions}
+
+# Malin's data separated the 'datetime' column into a column for hours and minutes, then added them together. Here, I'm using dplyr to add them as columns to the main df, alldata, but they could certainly be placed into separate dfs the way Malin did if needed. 
+
+alldata <- alldata %>% 
+  mutate(date = substr(datetime, 1, 10)) %>% 
+  mutate(time = substr(datetime, 12, 19)) %>% 
+  mutate(hours = as.numeric(substr(datetime, 12, 13))) %>% 
+  mutate(mins = as.numeric(substr(datetime, 15, 16))) %>% 
+  mutate(julian = hours*60 + mins) %>% 
+  mutate(regspecies = paste(reg, species, sep = ' '))
+
+
+	# The three functions below act like min/max/mean(na.rm=T), but they return NA if everything they're fed is NA. 
+	minna = function(x){
+		if(!all(is.na(x))) return(min(x, na.rm=T))
+		if(all(is.na(x))) return(NA)
+	}
+
+	meanna = function(x){
+		if(!all(is.na(x))) return(mean(x, na.rm=T))
+		if(all(is.na(x))) return(NA)
+	}
+	
+	maxna = function(x){
+		if(!all(is.na(x))) return(max(x, na.rm=T))
+		if(all(is.na(x))) return(NA)
+	}
+	
+	
+# ALEXA NOTE: AS FAR AS I CAN TELL, THESE ARE ARITHMETIC FUNCTIONS THAT CALCULATE SLIGHTLY MORE COMPLICATED STATISTICS FOR WHICH THERE WERE NO BUILT-IN R FUNCTIONS WHEN MALIN WROTE THIS CODE. I DON'T THINK I'LL UNDERSTAND WHAT THEY DO UNTIL I SEE THE USE CASE.
+	
+	# values in col 1, weights in col 2
+	wgtmean = function(x, na.rm=FALSE) wtd.mean(x=x[,1], weights=x[,2], na.rm=na.rm)
+	wgtmeanpres = function(x, na.rm=FALSE) wtd.mean(x=x[,1], weights=x[,2]>0, na.rm=na.rm) # only considers whether weight >0
+	wgtmedian = function(x) weighted.median(y=x[,1], w=x[,2]) # needs isotone package
+	wgtmeanpow = function(x, na.rm=FALSE, pow=1) wtd.mean(x=x[,1], weights=x[,2]^pow, na.rm=na.rm)
+	wgtsd = function(mat, ...){
+		x = mat[,1][mat[,2]>0] # trim to values with weight>0
+		w = mat[,2][mat[,2]>0]
+		sqrt(wtd.var(x=x, weights=w, ...))
+	}
+	wgtskew = function(mat, na.rm=FALSE){ # SAS: http://support.sas.com/documentation/cdl/en/proc/61895/HTML/default/viewer.htm#a002473330.htm
+		x = mat[,1][mat[,2]>0] # trim to values with weight>0
+		w = mat[,2][mat[,2]>0]
+		if(na.rm){
+			s = !is.na(x+w)
+			x = x[s]
+			w = w[s]
+		}
+		n = length(x)
+		w = n*w/sum(w) # normalize
+		if(n>2){
+			c3 = n/((n-1)*(n-2))
+			sdv = wgtsd(cbind(x,w), normwt=TRUE, na.rm=na.rm)
+			xbar = wtd.mean(x, w, na.rm=na.rm)
+			sk = c3*sum(w^(3/2)*((x-xbar)/sdv)^3)
+			return(sk)
+		} else {
+			return(NA)
+		}
+	}
+	wgtkurt = function(mat, na.rm=FALSE){ # SAS: http://support.sas.com/documentation/cdl/en/proc/61895/HTML/default/viewer.htm#a002473330.htm
+		x = mat[,1][mat[,2]>0] # trim to values with weight>0
+		w = mat[,2][mat[,2]>0]
+		if(na.rm){
+			s = !is.na(x+w)
+			x = x[s]
+			w = w[s]
+		}
+		n = length(x)
+		w = n*w/sum(w)
+		if(n>3){
+			c4 = n*(n+1)/((n-1)*(n-2)*(n-3))
+			suf = 3*(n-1)^2/((n-2)*(n-3))
+			sdv = wgtsd(cbind(x,w), normwt=TRUE, na.rm=na.rm)
+			xbar = wtd.mean(x, w, na.rm=na.rm)
+			sk = c4*sum(w^2*((x-xbar)/sdv)^4) - suf
+			return(sk)
+		} else {
+			return(NA)
+		}
+	}
+
+```
+
+Okay, here we go! The code below will calculate centroid shifts, I think, maybe. It's a 200+ line for loop that Malin wrote that I would not dare to tamper with! I've gone through and reassigned variable names to match this code. 
+
+``` {r calculating centroids}
+
+# ALEXA NOTES: I don't really understand how the for loop below works sufficiently to convert it from base R into a more elegant solution. For now, I'm just translating Malin's code using my variable names, but I'd like to revisit this and rewrite it in the future. 
+
+# MALIN: 
+	# Doesn't calculate along-shelf distance, which may be more appropriate than lat
+	# print warnings as they occur
+	options(warn=1)
+	
+yrs <- sort(unique(alldata$year))
+
+# Fill the matrices by year for mins, maxes, and moments (2nd, 3rd, 4th)". 
+
+length(yrs) #48 
+
+for(i in 1:length(yrs)){
+  print(yrs[i])
+	inds = alldata$year == yrs[i] 
+	inds2 = alldata$year == yrs[i] & !is.na(alldata$lat) & !is.na(alldata$wtcpue) # for lat calculations 
+
+# Min lat
+	temp = aggregate(alldata$lat[inds & alldata$wtcpue>0], by = list(regspecies = alldata$regspecies[inds & alldata$wtcpue>0]), FUN = minna)
+	  names(temp)[2] = yrs[i]
+	minlat = merge(minlat, temp, all.x=TRUE)
+
+# Max lat: only use lats where spp is present
+	temp = aggregate(alldata$lat[inds & alldata$wtcpue>0], by = list(regspecies = alldata$regspecies[inds & alldata$wtcpue>0]), FUN = maxna)
+	  names(temp)[2] = yrs[i]
+	maxlat = merge(maxlat, temp, all.x=TRUE)		
+		
+	# Center of biomass lat, by individual tows
+	temp = summarize(data[inds, c('lat', 'wtcpue')], by = list(regspp = data$regspp[inds]), FUN = wgtmean)
+		names(temp)[2] = yrs[i]
+	centbiolatindiv = merge(centbiolatindiv, temp, all.x=TRUE)
 
 
 ```
+
+
+
+
 
