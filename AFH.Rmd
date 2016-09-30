@@ -15,6 +15,7 @@ Objective 1: Identify the species with the greatest mismatch between taxon shift
 
 ### trawlData package setup
 
+
 ```{r trawlData setup and package loading}
 # install.packages('devtools')
 # library(devtools) # note that trawlData is not on CRAN and cannot be installed with install.packages('trawlData')
@@ -40,13 +41,16 @@ require(zoo) # allows 'SEASON' to be extracted from 'DATE' with seus
 library(dplyr)
 library(tidyr)
 library(ggplot2)
+# TODO: library(tidyverse)
 
 # These packages are required by Malin's code:
 library(geosphere)
 
-setwd('~/github/trawlData') # or current directory 
+#setwd('~/github/trawlData') # or current directory 
 # Some of these packages tend to vanish from R and need to be reinstalled, so be sure to scroll through the console and check they all loaded properly. 
 
+# set overall variables
+data_size = 'small' # or 'big'
 ```
 
 ## Part 1: Calculate taxon shifts
@@ -54,94 +58,118 @@ setwd('~/github/trawlData') # or current directory
 First, I'm going to load all of the clean data from trawlData. Note that this code chunk takes approximately 3 minutes to run on my MBA. 
 
 ``` {r load .Rdata files}
-load("~/github/trawlData/data/clean.ai.RData") # Aleutian Islands
-load("~/github/trawlData/data/clean.ebs.RData") # Eastern Bering Sea
-load("~/github/trawlData/data/clean.gmex.RData") # Gulf of Mexico
-load("~/github/trawlData/data/clean.goa.RData") # Gulf of Alaska
-load("~/github/trawlData/data/clean.neus.RData") # Northeast US
-load("~/github/trawlData/data/clean.sa.RData") # South Atlantic
-load("~/github/trawlData/data/clean.shelf.RData") # Scotian Shelf
-load("~/github/trawlData/data/clean.wcann.RData") # West Coast (annual survey)
-load("~/github/trawlData/data/clean.wctri.RData") # West Coast (triennial survey) 
+rdata = 'alldata.Rdata'
+rdata_small = 'alldata_small.Rdata'
+
+if (!file.exists(rdata)){
+  
+  # load individual Rdata ----
+  load("data/clean.ai.RData")    # Aleutian Islands
+  load("data/clean.ebs.RData")   # Eastern Bering Sea
+  load("data/clean.gmex.RData")  # Gulf of Mexico
+  load("data/clean.goa.RData")   # Gulf of Alaska
+  load("data/clean.neus.RData")  # Northeast US
+  load("data/clean.sa.RData")    # South Atlantic
+  load("data/clean.shelf.RData") # Scotian Shelf
+  load("data/clean.wcann.RData") # West Coast (annual survey)
+  load("data/clean.wctri.RData") # West Coast (triennial survey)
+
+  # filtering columns and combining data  
+  all(colnames(clean.ai) == colnames(clean.ebs)) # TRUE - these have matching columns 
+
+  length(colnames(clean.gmex)) # 77
+  length(colnames(clean.ebs)) # 49 
+  # these two, um, don't match. What's missing from .ebs? 
+  setdiff(colnames(clean.gmex),colnames(clean.ebs)) 
+  setdiff(colnames(clean.ebs),colnames(clean.gmex)) #.gmex is only missing 'haul' 
+  
+  length(colnames(clean.goa)) #49
+  all(colnames(clean.goa) == colnames(clean.ebs)) # TRUE; .ai, .ebs, and .goa match so far
+  
+  length(colnames(clean.neus)) # 57
+  setdiff(colnames(clean.ai),colnames(clean.neus)) # .neus is only missing 'haul' 
+  setdiff(colnames(clean.neus),colnames(clean.ai)) 
+  
+  length(colnames(clean.sa)) # 100! SO MUCH DATAAA
+  setdiff(colnames(clean.ai),colnames(clean.sa)) # .sa is missing 'station', 'SID', 'cruise', and 'haul'
+  
+  length(colnames(clean.shelf)) # 77 
+  setdiff(colnames(clean.ai),colnames(clean.shelf)) # .shelf is missing "station" "SID"     "vessel"  "cruise"  "haul" 
+  
+  length(colnames(clean.wcann)) # 56
+  setdiff(colnames(clean.ai),colnames(clean.wcann)) # .wcann is missing "station" "SID"     "stemp"   "cruise"  "haul"
+  
+  length(colnames(clean.wctri)) # 81
+  setdiff(colnames(clean.ai),colnames(clean.wctri)) # .wctri is not missing anything that's in .ai! 
+  setdiff(colnames(clean.wctri),colnames(clean.ai)) 
+  
+  col.matching <- Reduce(
+    intersect, 
+    list(colnames(clean.ai),colnames(clean.ebs),colnames(clean.gmex),colnames(clean.goa),colnames(clean.neus),colnames(clean.sa),colnames(clean.shelf),colnames(clean.wcann),colnames(clean.wctri))) # generate a list (or vector?) of all the column names that intersect between the nine datasets. 
+  
+  match.ai <- clean.ai %>% 
+    select(one_of(col.matching)) # this creates a new df for .ai with just the columns that are shared across all datasets 
+  colnames(match.ai) # just to check! 
+  
+  match.ebs <- clean.ebs %>% 
+    select(one_of(col.matching))
+  
+  match.gmex <- clean.gmex %>% 
+    select(one_of(col.matching))
+  
+  match.goa <- clean.goa %>% 
+    select(one_of(col.matching))
+  
+  match.neus <- clean.neus %>% 
+    select(one_of(col.matching))
+  
+  match.sa <- clean.sa %>% 
+    select(one_of(col.matching))
+  
+  match.shelf <- clean.shelf %>% 
+    select(one_of(col.matching))
+  
+  match.wcann <- clean.wcann %>% 
+    select(one_of(col.matching))
+  
+  match.wctri <- clean.wctri %>% 
+    select(one_of(col.matching))
+  
+  alldata <- tbl_df(rbind(match.ai, match.ebs, match.gmex, match.goa, match.neus, match.sa, match.shelf, match.wcann, match.wctri)) # this is slow, and generates a df with 4,797,881 rows.
+  
+  alldata[1:5,] # exploring just the first five rows of this dataset shows a number of rows with NA in most of the columns. in 'trawlData-overview.Rmd', it is noted that the 'keep.row' column was added to instruct users of this dataset whether the curators recommend keeping the data for analysis or not. Let's try dropping those rows, and see if that removes all the NA rows. 
+  
+  alldata <- alldata %>% 
+    filter(keep.row == 'TRUE') # alldata now has 2,598,992 rows, meaning that 2,198,889 were removed for data quality reasons.  
+  
+  #alldata[1:5,]
+  
+  # At this stage, we can remove the intermediates clean._ and match._ that are redundant with alldata. 
+  
+  rm(list = c('clean.ai', 'clean.ebs', 'clean.gmex', 'clean.goa', 'clean.neus', 'clean.sa', 'clean.shelf', 'clean.wcann', 'clean.wctri', 'col.matching'))
+  rm(list = c('match.ai','match.ebs','match.gmex','match.goa','match.neus','match.sa','match.shelf','match.wcann','match.wctri'))
+
+  # save image ----
+  save.image(file=rdata)
+} else {
+  load(rdata)
+}
+
+
+if (!file.exists(rdata)){
+  alldata = alldata %>%
+    sample_n(10000)
+  save.image(file=rdata_small)
+}
+
+if (data_size == 'small'){
+  load(rdata_small)
+} else {
+  load(rdata)
+}
 ```
 
 The following code is adapted from Malin's `Range shift LH 2016-06-07.R` code. He used datasets saved on his hard drive as .csv files, so the file names and data formats may be a little different. As a convert to dplyr and a novice at base R, I've also converted a lot of the data manipulation into dplyr. 
-
-``` {r explore columns and combine dataframes}
-
-all(colnames(clean.ai) == colnames(clean.ebs)) # TRUE - these have matching columns 
-
-length(colnames(clean.gmex)) # 77
-length(colnames(clean.ebs)) # 49 
-# these two, um, don't match. What's missing from .ebs? 
-setdiff(colnames(clean.gmex),colnames(clean.ebs)) 
-setdiff(colnames(clean.ebs),colnames(clean.gmex)) #.gmex is only missing 'haul' 
-
-length(colnames(clean.goa)) #49
-all(colnames(clean.goa) == colnames(clean.ebs)) # TRUE; .ai, .ebs, and .goa match so far
-
-length(colnames(clean.neus)) # 57
-setdiff(colnames(clean.ai),colnames(clean.neus)) # .neus is only missing 'haul' 
-setdiff(colnames(clean.neus),colnames(clean.ai)) 
-
-length(colnames(clean.sa)) # 100! SO MUCH DATAAA
-setdiff(colnames(clean.ai),colnames(clean.sa)) # .sa is missing 'station', 'SID', 'cruise', and 'haul'
-
-length(colnames(clean.shelf)) # 77 
-setdiff(colnames(clean.ai),colnames(clean.shelf)) # .shelf is missing "station" "SID"     "vessel"  "cruise"  "haul" 
-
-length(colnames(clean.wcann)) # 56
-setdiff(colnames(clean.ai),colnames(clean.wcann)) # .wcann is missing "station" "SID"     "stemp"   "cruise"  "haul"
-
-length(colnames(clean.wctri)) # 81
-setdiff(colnames(clean.ai),colnames(clean.wctri)) # .wctri is not missing anything that's in .ai! 
-setdiff(colnames(clean.wctri),colnames(clean.ai)) 
-
-col.matching <- Reduce(intersect, list(colnames(clean.ai),colnames(clean.ebs),colnames(clean.gmex),colnames(clean.goa),colnames(clean.neus),colnames(clean.sa),colnames(clean.shelf),colnames(clean.wcann),colnames(clean.wctri))) # generate a list (or vector?) of all the column names that intersect between the nine datasets. 
-
-match.ai <- clean.ai %>% 
-  select(one_of(col.matching)) # this creates a new df for .ai with just the columns that are shared across all datasets 
-colnames(match.ai) # just to check! 
-
-match.ebs <- clean.ebs %>% 
-  select(one_of(col.matching))
-
-match.gmex <- clean.gmex %>% 
-  select(one_of(col.matching))
-
-match.goa <- clean.goa %>% 
-  select(one_of(col.matching))
-
-match.neus <- clean.neus %>% 
-  select(one_of(col.matching))
-
-match.sa <- clean.sa %>% 
-  select(one_of(col.matching))
-
-match.shelf <- clean.shelf %>% 
-  select(one_of(col.matching))
-
-match.wcann <- clean.wcann %>% 
-  select(one_of(col.matching))
-
-match.wctri <- clean.wctri %>% 
-  select(one_of(col.matching))
-
-alldata <- tbl_df(rbind(match.ai, match.ebs, match.gmex, match.goa, match.neus, match.sa, match.shelf, match.wcann, match.wctri)) # this is slow, and generates a df with 4,797,881 rows.
-
-alldata[1:5,] # exploring just the first five rows of this dataset shows a number of rows with NA in most of the columns. in 'trawlData-overview.Rmd', it is noted that the 'keep.row' column was added to instruct users of this dataset whether the curators recommend keeping the data for analysis or not. Let's try dropping those rows, and see if that removes all the NA rows. 
-
-alldata <- alldata %>% 
-  filter(keep.row == 'TRUE') # alldata now has 2,598,992 rows, meaning that 2,198,889 were removed for data quality reasons.  
-
-alldata[1:5,]
-
-# At this stage, we can remove the intermediates clean._ and match._ that are redundant with alldata. 
-
-rm(list = c('clean.ai', 'clean.ebs', 'clean.gmex', 'clean.goa', 'clean.neus', 'clean.sa', 'clean.shelf', 'clean.wcann', 'clean.wctri'))
-rm(list = c('match.ai','match.ebs','match.gmex','match.goa','match.neus','match.sa','match.shelf','match.wcann','match.wctri'))
-
-```
 
 Above, we find that `clean.ai`, `clean.ebs`, and `clean.goa` have 49 columns that match perfectly. The other six datasets all have more information, but (excepting `clean.wctri`) they are all missing at least one column in the 49 shared by `clean.ai`, `clean.ebs`, and `clean.goa`. `col.matching` contains all the columns that are shared among the nine datasets. 
 
@@ -151,7 +179,7 @@ Skipping the chunk of Malin's code that produces maps and figures, the next step
 
 NOTE 9.27.16: *do not run this chunk!* I can't tell which of the filtering in Malin's original code was already done in the clean._ files. I'll check in with Ryan about what may or may not need to be left in here, but for now assume that all the species in alldata are worth analyzing and skip to the next chunk. 
 
-``` {r exploring and filtering - lines 176-237 of Malin's code}
+``` {r exploring and filtering - lines 176-237 of Malin's code, eval=F}
 colnames(alldata) # there is a column called 'spp', one called 'species', and one called 'genus'. What's the difference? 
 
 alldata[1:5,'spp']
@@ -387,15 +415,68 @@ yrs <- sort(unique(alldata$year))
 
 length(yrs) #48 
 
-for(i in 1:length(yrs)){
-  print(yrs[i])
+for(i in 1:length(yrs)){ # i = 1:length(yrs)[1] # i = 1
+
+  yr = yrs[i]
+  print(yr)
+  
+  # 1. unique by species for one year (still in loop, vs others outside for loop)
+  d_yr = alldata  %>%
+    filter(year == yr, wtcpue > 0) %>% # !is.na(alldata$lat), !is.na(alldata$wtcpue): same nrow()
+    group_by(regspecies) %>%
+    transmute(
+      year      = yr,
+      variable  = 'lat_minna',
+      value = minna(lat))
+
+  # 2.a. unique by species for all years, in tidy form (then rbind)
+  d_allyrs = alldata  %>%
+    filter(wtcpue > 0) %>% # !is.na(alldata$lat), !is.na(alldata$wtcpue): same nrow()
+    group_by(regspecies, year) %>%
+    transmute(
+      variable  = 'lat_minna',
+      value = minna(lat))
+
+  # 2.b. for next variable
+  d_allyrs = bind_rows(
+    d_allyrs,
+    alldata  %>%
+      filter(wtcpue > 0) %>% # !is.na(alldata$lat), !is.na(alldata$wtcpue): same nrow()
+      group_by(regspecies, year) %>%
+      transmute(
+        variable  = 'lat_maxna',
+        value = maxna(lat)))
+  
+  
+  # 3. unique by species for all years, in less tidy form (each var as a new column: most parsimonious! and works if all have same filter criteria)
+  d_allyrs = alldata  %>%
+    filter(wtcpue > 0) %>% # !is.na(alldata$lat), !is.na(alldata$wtcpue): same nrow()
+    group_by(regspecies, year) %>%
+    transmute(
+      lat_minna = minna(lat),
+      lat_maxna = maxna(lat))
+
+  # for next variable
+  d_allyrs = bind_rows(
+    d_allyrs,
+    alldata  %>%
+      filter(wtcpue > 0) %>% # !is.na(alldata$lat), !is.na(alldata$wtcpue): same nrow()
+      group_by(regspecies, year) %>%
+      transmute(
+        variable  = 'lat_maxna',
+        value = maxna(lat)))
+  
+  
+  # rbind all other values
+
+  
 	inds = alldata$year == yrs[i] 
 	inds2 = alldata$year == yrs[i] & !is.na(alldata$lat) & !is.na(alldata$wtcpue) # for lat calculations 
-
+	
 # Min lat
-	temp = aggregate(alldata$lat[inds & alldata$wtcpue>0], by = list(regspecies = alldata$regspecies[inds & alldata$wtcpue>0]), FUN = minna)
-	  names(temp)[2] = yrs[i]
-	minlat = merge(minlat, temp, all.x=TRUE)
+	btemp = aggregate(alldata$lat[inds & alldata$wtcpue>0], by = list(regspecies = alldata$regspecies[inds & alldata$wtcpue>0]), FUN = minna)
+	  names(btemp)[2] = yrs[i]
+	minlat = merge(minlat, btemp, all.x=TRUE)
 
 # Max lat: only use lats where spp is present
 	temp = aggregate(alldata$lat[inds & alldata$wtcpue>0], by = list(regspecies = alldata$regspecies[inds & alldata$wtcpue>0]), FUN = maxna)
