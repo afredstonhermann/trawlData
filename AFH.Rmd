@@ -5,6 +5,12 @@ date: "September 9, 2016"
 output: html_document
 ---
 
+# ALEXA'S TO-DO LIST: 10-11-2016
+
+* Figure out functions with multiple arguments in dplyr so that I can fix the df_weighted chunk 
+* Malin separately calculated max, min, and mean for 'julian' and 'minutes since midnight'. Isn't that the same thing? Is one of them calculating length of *tow* (which I don't think is in alldata)? 
+* Do I need SST data for the actual calculations and if so, how do I get it? 
+
 # Analyzing and using North American trawl data
 
 ## Objectives
@@ -22,6 +28,8 @@ The following research questions will be explored in this analysis.
 Note that if this is opened as an R project, setwd() is unnecessary. 
 
 **Note**: in the chunk below, choose whether you want to work with the full dataset (`data_size = 'big'`) or a random sample of 10,000 rows, in which case specify `data_size = 'small'`. 
+
+**Note**: the chunk below doesn't work exactly how it's supposed to, but you can always just run what's inside the conditional statement to create `alldata` and then subsample it if you'd like to have a smaller df in memory. 
 
 ```{r package loading}
 # install.packages('devtools')
@@ -605,12 +613,6 @@ This chunk addresses approximately lines 461-734 of `Range shift LH 2016-06-07.R
       )
 	
 		
-
-# Outstanding issues / questions: 
-    
-# Malin separately calculated max, min, and mean for 'julian' and 'minutes since midnight'. Isn't that the same thing? Is one of them calculating length of *tow* (which I don't think is in alldata)? 
-# Where is SST and do I need it? 
-
 
 
 # Stopped at line 643
