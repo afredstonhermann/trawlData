@@ -11,12 +11,19 @@ output: html_document
 
 Malin found a strong correlation between taxon shift and thermal shift in marine ectotherms based on this North American trawl data. My research focuses on non-climate drivers of species distributions, particularly for range-shifting species in the Anthropocene. 
 
-Objective 1: Identify the species with the greatest mismatch between taxon shift and thermal shift - i.e. which species are moving vastly slower or faster than climate change? 
+The following research questions will be explored in this analysis. 
 
-### trawlData package setup
+1. Which species have the greatest mismatch between taxon shift and thermal shift - i.e. which species are moving vastly slower or faster than climate change? 
+2. Does the inclusion of biogeographic boundaries for species that might be inhibited by them (i.e. slow-moving or sessile adults with PLD) improve predictions? 
+3. What is the overlap of haul sites with full species distributions (i.e. Aquamaps/IUCN ranges) and how might this influence the rate of shift observed in these results? 
 
+# Load packages 
 
-```{r trawlData setup and package loading}
+Note that if this is opened as an R project, setwd() is unnecessary. 
+
+**Note**: in the chunk below, choose whether you want to work with the full dataset (`data_size = 'big'`) or a random sample of 10,000 rows, in which case specify `data_size = 'small'`. 
+
+```{r package loading}
 # install.packages('devtools')
 # library(devtools) # note that trawlData is not on CRAN and cannot be installed with install.packages('trawlData')
 # setwd('Users/alexa/github/trawlData') # can replace with pathname to any working directory 
@@ -28,39 +35,42 @@ Objective 1: Identify the species with the greatest mismatch between taxon shift
 library(trawlData)
 ls("package:trawlData") # lists all functions in package 
 
-# the following packages are required to run the full OceanAdapt analysis of taxon shifts, with comments lifted from that code as well: 
+# Packages required to run OceanAdapt code (comments by Malin): 
 library(data.table) # much of this code could be sped up by converting to data.tables
 library(PBSmapping) # for calculating stratum areas
 library(maptools) # for calculating stratum areas
 library(Hmisc)
-require(stringr) # allow 'STRATA' to be extracted from 'STATIONCODE' with seus
-require(lubridate) # for manipulating 'DATE' and extracting 'SEASON' with sues
 require(zoo) # allows 'SEASON' to be extracted from 'DATE' with seus
-
-# Alexa likes the following packages: 
-library(dplyr)
-library(tidyr)
-library(ggplot2)
-# TODO: library(tidyverse)
-
-# These packages are required by Malin's code:
 library(geosphere)
 
-#setwd('~/github/trawlData') # or current directory 
+# Packages required to run Alexa's code: 
+library(tidyverse) # this genius package will load dplyr, tidyr, ggplot2, readr, tibble, stringr, lubridate, modelr, broom, and many other super helpful packages
+
 # Some of these packages tend to vanish from R and need to be reinstalled, so be sure to scroll through the console and check they all loaded properly. 
 
 # set overall variables
-data_size = 'small' # or 'big'
+data_size = 'big' # 'small' or 'big'
 ```
 
-## Part 1: Calculate taxon shifts
+# Load data
 
-First, I'm going to load all of the clean data from trawlData. Note that this code chunk takes approximately 3 minutes to run on my MBA. 
+The code below will accomplish several data cleaning tasks: 
+* Eliminate columns in the regional dataframes that are not shared by all regions. 
+* Combine the regional datasets into one data table, `alldata`. 
+* Drop rows labeled by trawlData as `keep.row = FALSE`. 
+* Add new columns to `alldata` as needed by analyses further in the code. 
+
+This chunk will load `alldata` or `alldata_small` into R memory depending on whether `data_size = 'small'` or `'big'` is specified above. 
+
+If any changes are made to alldata, simply delete rdata in the working directory and re-run this chunk. 
+
+This chunk may take about five minutes to run. 
 
 ``` {r load .Rdata files}
 rdata = 'alldata.Rdata'
 rdata_small = 'alldata_small.Rdata'
 
+# recreate alldata from source files if and only if rdata does not exist: 
 if (!file.exists(rdata)){
   
   # load individual Rdata ----
@@ -74,32 +84,23 @@ if (!file.exists(rdata)){
   load("data/clean.wcann.RData") # West Coast (annual survey)
   load("data/clean.wctri.RData") # West Coast (triennial survey)
 
-  # filtering columns and combining data  
+  # filtering columns to exclude any that are not shared by all regional datasets 
   all(colnames(clean.ai) == colnames(clean.ebs)) # TRUE - these have matching columns 
 
-  length(colnames(clean.gmex)) # 77
-  length(colnames(clean.ebs)) # 49 
-  # these two, um, don't match. What's missing from .ebs? 
   setdiff(colnames(clean.gmex),colnames(clean.ebs)) 
   setdiff(colnames(clean.ebs),colnames(clean.gmex)) #.gmex is only missing 'haul' 
   
-  length(colnames(clean.goa)) #49
   all(colnames(clean.goa) == colnames(clean.ebs)) # TRUE; .ai, .ebs, and .goa match so far
   
-  length(colnames(clean.neus)) # 57
   setdiff(colnames(clean.ai),colnames(clean.neus)) # .neus is only missing 'haul' 
   setdiff(colnames(clean.neus),colnames(clean.ai)) 
   
-  length(colnames(clean.sa)) # 100! SO MUCH DATAAA
   setdiff(colnames(clean.ai),colnames(clean.sa)) # .sa is missing 'station', 'SID', 'cruise', and 'haul'
   
-  length(colnames(clean.shelf)) # 77 
   setdiff(colnames(clean.ai),colnames(clean.shelf)) # .shelf is missing "station" "SID"     "vessel"  "cruise"  "haul" 
   
-  length(colnames(clean.wcann)) # 56
   setdiff(colnames(clean.ai),colnames(clean.wcann)) # .wcann is missing "station" "SID"     "stemp"   "cruise"  "haul"
   
-  length(colnames(clean.wctri)) # 81
   setdiff(colnames(clean.ai),colnames(clean.wctri)) # .wctri is not missing anything that's in .ai! 
   setdiff(colnames(clean.wctri),colnames(clean.ai)) 
   
@@ -109,8 +110,7 @@ if (!file.exists(rdata)){
   
   match.ai <- clean.ai %>% 
     select(one_of(col.matching)) # this creates a new df for .ai with just the columns that are shared across all datasets 
-  colnames(match.ai) # just to check! 
-  
+
   match.ebs <- clean.ebs %>% 
     select(one_of(col.matching))
   
@@ -147,57 +147,58 @@ if (!file.exists(rdata)){
   # At this stage, we can remove the intermediates clean._ and match._ that are redundant with alldata. 
   
   rm(list = c('clean.ai', 'clean.ebs', 'clean.gmex', 'clean.goa', 'clean.neus', 'clean.sa', 'clean.shelf', 'clean.wcann', 'clean.wctri', 'col.matching'))
-  rm(list = c('match.ai','match.ebs','match.gmex','match.goa','match.neus','match.sa','match.shelf','match.wcann','match.wctri'))
+  rm(list = c('match.ai','match.ebs','match.gmex','match.goa','match.neus','match.sa','match.shelf','match.wcann','match.wctri')) 
+  
+  # Finally, we want to manipulate alldata to support analyses later in the code. 
+  
+  alldata <- alldata %>% 
+  mutate(date = substr(datetime, 1, 10)) %>% 
+  mutate(time = substr(datetime, 12, 19)) %>% 
+  mutate(hours = as.numeric(substr(datetime, 12, 13))) %>% 
+  mutate(mins = as.numeric(substr(datetime, 15, 16))) %>% 
+  mutate(julian = hours*60 + mins) %>% 
+  mutate(regspp = paste(reg, spp, sep = ' '))
 
   # save image ----
   save.image(file=rdata)
 } else {
-  load(rdata)
+    load(rdata)
 }
 
+# recreate alldata_small from source files if and only if rdata_smalldoes not exist: 
 
-if (!file.exists(rdata)){
+if (!file.exists(rdata_small)){
   alldata = alldata %>%
     sample_n(10000)
   save.image(file=rdata_small)
-}
+  }
+
+
+# load rdata or rdata_small into memory depending on what was specified in previous chunk (regardless, it will be named alldata, so the subsequent code can run): 
 
 if (data_size == 'small'){
   load(rdata_small)
 } else {
   load(rdata)
 }
+# BEN BEST QUESTION: currently this generates a 10,000 row df regardless of whether data_size = 'big' or 'small'
+
+
 ```
 
-The following code is adapted from Malin's `Range shift LH 2016-06-07.R` code. He used datasets saved on his hard drive as .csv files, so the file names and data formats may be a little different. As a convert to dplyr and a novice at base R, I've also converted a lot of the data manipulation into dplyr. 
+# Exploring the data 
 
-Above, we find that `clean.ai`, `clean.ebs`, and `clean.goa` have 49 columns that match perfectly. The other six datasets all have more information, but (excepting `clean.wctri`) they are all missing at least one column in the 49 shared by `clean.ai`, `clean.ebs`, and `clean.goa`. `col.matching` contains all the columns that are shared among the nine datasets. 
-
-To track Malin's original code as closely as possible, I've eliminated the rows that are not shared by all dataframes and created new `match.` dataframes. 
-
-Skipping the chunk of Malin's code that produces maps and figures, the next step in his data analysis was to identify the taxa that were represented sufficiently in the data for calculations. 
-
-NOTE 9.27.16: *do not run this chunk!* I can't tell which of the filtering in Malin's original code was already done in the clean._ files. I'll check in with Ryan about what may or may not need to be left in here, but for now assume that all the species in alldata are worth analyzing and skip to the next chunk. 
-
-``` {r exploring and filtering - lines 176-237 of Malin's code, eval=F}
+```{r data exploration, eval=F} 
 colnames(alldata) # there is a column called 'spp', one called 'species', and one called 'genus'. What's the difference? 
-
-alldata[1:5,'spp']
-alldata[1:5,'species']
-# do these columns ever NOT match? 
 
 test <- alldata %>% 
   filter(spp != species)
 test[99:120,'spp']
 test[99:120,'species']
-# from exploring this a little bit, we see that 'spp' and 'species' are different taxonomic versions of the same species name. I'm going to use the 'species' column from now on, because it looks like 'spp' has subspecies which I'd rather not separate out. 
-
-# Here, rather than try to replicate Malin's code exactly, I'm going to try to produce the same outputs with different data manipulation approaches. 
+# from exploring this a little bit, we see that 'spp' and 'species' are different taxonomic versions of the same species name. For now, I'm going to use spp because it matches Malin's code. 
 
 # How many unique species are there in this dataset? 
-
-unique.species <- unique(data$species)
-length(unique.species) #2621 species 
+length(unique(alldata$spp)) #2626
 
 # What's the MAXIMUM number of years any region was sampled? 
 
@@ -206,13 +207,10 @@ num.years <- alldata %>%
   summarise(n_distinct(year))
 # this creates a small dataframe with just the list of 9 regions and the number of distinct years the region was sampled. This ranges from 48 (neus) to 12 (ai, wcann) and 10 (wctri). 
 
-# Next, I want to subset the data to contain only SPECIES THAT ARE PRESENT IN EVERY YEAR THE REGION WAS SAMPLED, FOR EACH REGION. So we want to subset the dataframe for rows where unique(year) for the species matches unique(year) for the region. 
+# How many species are sampled at least once a year? (solution by @TClavelle)
 
-# This was a thorny dplyr problem that ended in a stack overflow question answered by @aichao and @TClavelle. Thanks, anonymous computer scientists! http://stackoverflow.com/questions/39649533/subsetting-dataframe-by-multiple-row-and-column-matches-using-dplyr
-
-#TClavelle's solution
 data.test <- alldata %>%
-  mutate(ids = paste(reg, species, sep=' ')) 
+  mutate(ids = paste(reg, spp, sep=' ')) 
 
 data.test.2 <- data.test %>% 
   group_by(reg) %>% 
@@ -225,21 +223,54 @@ data.test.2 <- data.test %>%
   ungroup()
 
 filter(data.test, ids %in% data.test.2$ids)
-length(unique(data.test$species))
+length(unique(data.test$spp))
 
 data.test %>%
   group_by(reg) %>%
-  summarize(n_sps = n_distinct(species))
+  summarize(n_sps = n_distinct(spp))
+
+rm('data.test','data.test.2')
 
 # This solution does not filter out any species. However, I think that's because they were filtered out of the dataset already! I'll ask Ryan Batt. 
 
 # How many species were present at least ten times per year? 
 
+# How many unique region + species combinations are there? 
+length(unique(alldata$regspp)) # Malin found 721. I found 
+
+# How many tows are captured in this data?
+length(unique(alldata$haulid)) # 80304
+
+# The code below is adapted directly from Malin's, lines 257-269. He used a 'goodhauls' df, but in keeping with the rest of this code, I'm assuming that everything in the clean._ trawlData files (once I removed the keep.row = FALSE rows) is a "good haul". 
+
+# MALIN: Area surveyed
+regions <- unique(alldata$reg)
+require(geosphere)
+areas = rep(NA, length(regions))
+for(i in 1:length(regions)){
+	j = alldata$reg == regions[i]
+	bd = chull(alldata$lat[j], alldata$lon[j]) # MALIN: the convex hull bounds # Alexa note: as far as I can tell, this is describing the outer bounds of a convex hull shapes for all the points in each region? 
+	lonlat = alldata[j,c('lon', 'lat')][bd,] # I don't really understand what this is ... why are there 15 rows, not 9?  
+	lonlat$lon[lonlat$lon < -180] = lonlat$lon[lonlat$lon < -180] + 360 # MALIN: areaPolygon doesn't like lon < -180 
+	areas[i] = areaPolygon(lonlat)	
+} 
+# this is calculating the area of that convex hull 
+areas = data.frame(reg = regions, areakm2 = areas/1000^2)
+areas
+	sum(areas$areakm2) # Malin got 3,339,354 km2 (convex hull approach). I got 4,716,696. 
+
+# Depths 
+summary(alldata$depth) # min 2.5m, max 1975m, mean 118.1m, median 80m. Malin found: 4 to 3304 m, mean 125m. 
+
+# Abundances 
+# REVISIT THIS ONCE I CHECK WITH RYAN WHETHER cntcpue = number of individuals
+
+
 ```
 
-Next, we want to explore the data a little more, and generate some summary plots and statistics to understand what we have. 
+To continue exploring the data, Malin also wrote code to plot histograms of species abundances by region, below. 
 
-``` {r calculate basic summary statistics - Malin's code lines 239-?}
+``` {r histograms, eval=F}
 
 # Make a histogram of tow abundances for each species in each region - the for loop below is directly adapted from Malin's code: 
 
@@ -267,63 +298,17 @@ regs = sort(unique(alldata$reg))
 	require(Hmisc)
 	require(isotone)
 
-# Generate a list of all species + region combinations (note that Tyler does this above more elegantly with dplyr, but this is a list, not a df)
-
-	taxlist = alldata[!duplicated(data[,c('reg', 'species')]), c('reg', 'species')]
-		taxlist$regspecies = paste(taxlist$reg, taxlist$species, sep='_') # unique ID for each region/spp combination
-		dim(taxlist) # Malin found 721. On 9/27/16 I found 5206. Hmmmmm ... 
-		length(unique(taxlist$regspecies)) # Malin found 721. On 9/27/16 I found 5206. Hmmmmm ... 
-
-# How many tows are captured in this data?
-length(unique(alldata$haulid)) # 80304
-
-# The code below is also adapted directly from Malin's, lines 257-269. He used a 'goodhauls' df, but in keeping with the rest of this code, I'm assuming that everything in the clean._ trawlData files (once I removed the keep.row = FALSE rows) is a "good haul". 
-
-# MALIN: Area surveyed
-regions <- unique(alldata$reg)
-require(geosphere)
-areas = rep(NA, length(regions))
-for(i in 1:length(regions)){
-	j = alldata$reg == regions[i]
-	bd = chull(alldata$lat[j], alldata$lon[j]) # MALIN: the convex hull bounds # Alexa note: as far as I can tell, this is describing the outer bounds of a convex hull shapes for all the points in each region? 
-	lonlat = alldata[j,c('lon', 'lat')][bd,] # I don't really understand what this is ... why are there 15 rows, not 9?  
-	lonlat$lon[lonlat$lon < -180] = lonlat$lon[lonlat$lon < -180] + 360 # MALIN: areaPolygon doesn't like lon < -180 
-	areas[i] = areaPolygon(lonlat)	
-} 
-# this is calculating the area of that convex hull 
-areas = data.frame(reg = regions, areakm2 = areas/1000^2)
-areas
-	sum(areas$areakm2) # Malin got 3,339,354 km2 (convex hull approach). I got 4,716,696. 
-
-# Depths 
-summary(alldata$depth) # min 2.5m, max 1975m, mean 118.1m, median 80m. Malin found: 4 to 3304 m, mean 125m. 
-
-# Abundances 
-# REVISIT THIS ONCE I CHECK WITH RYAN WHETHER cntcpue = number of individuals
-
-# Number of taxa present >10x/year
-# ???????????
-
-
-
-# Skipping the exploration of taxonomic resolution, number of species occurrences / year, etc., because I think a lot of the species that fail this test were filtered out of trawlData. 
-
 ```
 
-I'm largely skipping lines 300-450, which deal with a lot of data exploration and df subsetting I'm hoping to streamline with dplyr. I'm picking Malin's code back up where he starts to tackle calculating range shifts. Before doing so, there are several necessary preparations: parsing the datetime column into a numeric format, and initializing all the functions Malin wrote for this analysis.  
+# Setup for centroid shift calculations 
 
-``` {r datetime and functions}
+The following code is adapted from Malin's `Range shift LH 2016-06-07.R` code. He used datasets saved on his hard drive as .csv files, so the file names and data formats may be a little different. As a convert to dplyr and a novice at base R, I've also converted a lot of the data manipulation into dplyr. 
 
-# Malin's data separated the 'datetime' column into a column for hours and minutes, then added them together. Here, I'm using dplyr to add them as columns to the main df, alldata, but they could certainly be placed into separate dfs the way Malin did if needed. 
+Much of Malin's original code was dedicated to cleaning up the data, which I have largely skipped because I believe trawlData is a much cleaner version of the source data than what Malin originally used. 
 
-alldata <- alldata %>% 
-  mutate(date = substr(datetime, 1, 10)) %>% 
-  mutate(time = substr(datetime, 12, 19)) %>% 
-  mutate(hours = as.numeric(substr(datetime, 12, 13))) %>% 
-  mutate(mins = as.numeric(substr(datetime, 15, 16))) %>% 
-  mutate(julian = hours*60 + mins) %>% 
-  mutate(regspecies = paste(reg, species, sep = ' '))
+The code chunk below loads all of the functions that Malin wrote for this analysis. At some point, consider folding these into a package (devtools). 
 
+``` {r functions}
 
 	# The three functions below act like min/max/mean(na.rm=T), but they return NA if everything they're fed is NA. 
 	minna = function(x){
@@ -340,9 +325,6 @@ alldata <- alldata %>%
 		if(!all(is.na(x))) return(max(x, na.rm=T))
 		if(all(is.na(x))) return(NA)
 	}
-	
-	
-# ALEXA NOTE: AS FAR AS I CAN TELL, THESE ARE ARITHMETIC FUNCTIONS THAT CALCULATE SLIGHTLY MORE COMPLICATED STATISTICS FOR WHICH THERE WERE NO BUILT-IN R FUNCTIONS WHEN MALIN WROTE THIS CODE. I DON'T THINK I'LL UNDERSTAND WHAT THEY DO UNTIL I SEE THE USE CASE.
 	
 	# values in col 1, weights in col 2
 	wgtmean = function(x, na.rm=FALSE) wtd.mean(x=x[,1], weights=x[,2], na.rm=na.rm)
@@ -398,96 +380,246 @@ alldata <- alldata %>%
 
 ```
 
-Okay, here we go! The code below will calculate centroid shifts, I think, maybe. It's a 200+ line for loop that Malin wrote that I would not dare to tamper with! I've gone through and reassigned variable names to match this code. 
+The chunk below is a completely rewritten approach to the giant for loop and numerous subset dataframes Malin used (lines 461+ of his code). It is intended to accomplish the same calculations using the same functions, but in a much more tidy and readable format using packages that have become available since the original code was written. 
 
-``` {r calculating centroids}
+This chunk addresses approximately lines 461-734 of `Range shift LH 2016-06-07.R`, which create a number of new dataframes to set up for centroid calculations. 
 
-# ALEXA NOTES: I don't really understand how the for loop below works sufficiently to convert it from base R into a more elegant solution. For now, I'm just translating Malin's code using my variable names, but I'd like to revisit this and rewrite it in the future. 
+``` {r further data manipulation}
 
-# MALIN: 
-	# Doesn't calculate along-shelf distance, which may be more appropriate than lat
-	# print warnings as they occur
-	options(warn=1)
-	
-yrs <- sort(unique(alldata$year))
+# The following parts of Malins' for loop all have the same conditions and can be folded into the same dplyr chunk - reference the functions chunk above for more information on the functions: 
+  
+# Center of biomass lat, by individual tows
+# centbiolatindiv = data.frame(regspp = taxlist$regspp, region=taxlist$region, spp = taxlist$spp) # not a stratum average
+# temp = summarize(data[inds, c('lat', 'wtcpue')], by = list(regspp = data$regspp[inds]), FUN = wgtmean)
+# names(temp)[2] = yrs[i]
+# centbiolatindiv = merge(centbiolatindiv, temp, all.x=TRUE)
+# Center of biomass lat, by individual tows (presence/absence)  
+# centbiolatindiv2 = data.frame(regspp = taxlist$regspp, region=taxlist$region, spp = taxlist$spp) # ave lat of presences  
+# temp = summarize(data[inds2, c('lat', 'wtcpue')], by = list(regspp = data$regspp[inds2]), FUN = wgtmeanpres)
+# names(temp)[2] = yrs[i]
+# centbiolatindiv2 = merge(centbiolatindiv2, temp, all.x=TRUE)
+# Center of biomass lat, by individual tows (weighted median)
+# centbiolatindiv3 = data.frame(regspp = taxlist$regspp, region=taxlist$region, spp = taxlist$spp) # weighted median lat
+# temp = summarize(data[inds2, c('lat', 'wtcpue')], by = list(regspp = data$regspp[inds2]), FUN = wgtmedian)
+# names(temp)[2] = yrs[i]
+# temp$regspp = gsub('.[[:digit:]]*$', '', temp$regspp) # remove strange numbers at end of regspp
+# centbiolatindiv3 = merge(centbiolatindiv3, temp, all.x=TRUE)
+# Center of biomass lat, by individual tows (4th root)
+# centbiolatindiv4 = data.frame(regspp = taxlist$regspp, region=taxlist$region, spp = taxlist$spp) # ave lat of 4th root wtcpue
+# temp = summarize(data[inds2, c('lat', 'wtcpue')], by = list(regspp = data$regspp[inds2]), FUN = wgtmeanpow, pow=1/4)
+# names(temp)[2] = yrs[i]
+# centbiolatindiv4 = merge(centbiolatindiv4, temp, all.x=TRUE)
+# SD lat, weighted by biomass
+#	temp = summarize(data[inds, c('lat', 'wtcpue')], by = list(regspp = data$regspp[inds]), FUN = wgtsd, normwt=TRUE) # need normwt so that sample size is length of x, not sum(weights)
+#	names(temp)[2] = yrs[i]
+#	sdlat = merge(sdlat, temp, all.x=TRUE)  
+# Skewness lat, weighted by biomass
+#	temp = summarize(data[inds, c('lat', 'wtcpue')], by = list(regspp = data$regspp[inds]), FUN = wgtskew)
+#	names(temp)[2] = yrs[i]
+#	skewlat = merge(skewlat, temp, all.x=TRUE) 
+# Kurtosis lat, weighted by biomass
+#	temp = summarize(data[inds, c('lat', 'wtcpue')], by = list(regspp = data$regspp[inds]), FUN = wgtkurt)
+#	names(temp)[2] = yrs[i]
+#	kurtlat = merge(kurtlat, temp, all.x=TRUE)  
+# Center of biomass lon, by individual tows
+#	temp = summarize(data[inds, c('lon', 'wtcpue')], by = list(regspp = data$regspp[inds]), FUN = wgtmean)
+#	names(temp)[2] = yrs[i]
+#	centbiolonindiv = merge(centbiolonindiv, temp, all.x=TRUE)
+# SD lon, weighted by biomass
+#	temp = summarize(data[inds, c('lon', 'wtcpue')], by = list(regspp = data$regspp[inds]), FUN = wgtsd, normwt=TRUE) # need normwt so that sample size is length of x, not sum(weights)
+#	names(temp)[2] = yrs[i]
+#	sdlon = merge(sdlon, temp, all.x=TRUE)		
+# Center of biomass depth, by individual tows
+# temp = summarize(data[inds, c('depth', 'wtcpue')], by = list(regspp = data$regspp[inds]), FUN = wgtmean)
+# names(temp)[2] = yrs[i]
+# centbiodepthindiv = merge(centbiodepthindiv, temp, all.x=TRUE)
 
+# NOTE: this code doesn't run because the weighting functions need to evaluate a df as described below, but I think in intent it's correct. 
+# NOTE: in his notes Malin says this is calculated 'for individual tows'. I don't know if that's true ... it's calculated here for individual combinations of region, species, and year. To calculate this for tows, it should be grouped by haulid. 
+
+  d_weighted = alldata %>% 
+    group_by(regspp, year) %>% # equivalent to by = list(regspp = data$regspp[inds])
+    # mutate(
+     #  lat_wgtmean = wgtmean(lat, wtcpue), # the wgtmean function requires a two-column df where column 1 is the values (latitude), column 2 is the weights (wtcpue), and each row is a unique regspp. 
+     #  lat_wgtmeanpres = wgtmeanpres(lat, wtcpue), # this is the same function as above but it only considers rows where wtcpue > 0. This can also be done with a filter once I get the function above working
+     #  lat_wgtmedian = wgtmedian(lat, wtcpue),
+     #  lat_wgtmeanpow = wgtmeanpow(lat, wtcpue, pow=1/4),
+     #  lat_SD = wgtsd(lat, wtcpue, normwt=TRUE), 
+     #  lat_skew = wgtskew(lat, wtcpue),
+     #  lat_kurt = wgtkurt(lat, wtcpue),
+     #  lon_wgtmean = wgtmean(lon, wtcpue),
+     #  lon_SD = wgtsd(lon, wtcpue, normwt = TRUE),
+     #  depth_wgtmean = wgtmean(depth, wtcpue)
+     # ) 
+  
+--------
+
+# Full survey extent
+# minlat
+# temp = aggregate(data$lat[inds], by = list(region = data$region[inds]), FUN = minna)
+#	names(temp)[2] = yrs[i]
+#	surveyminlat = merge(surveyminlat, temp, all.x=TRUE)
+# meanlat
+# temp = aggregate(data$lat[inds], by = list(region = data$region[inds]), FUN = meanna)
+# names(temp)[2] = yrs[i]
+# surveymeanlat = merge(surveymeanlat, temp, all.x=TRUE)
+# maxlat
+#	temp = aggregate(data$lat[inds], by = list(region = data$region[inds]), FUN = maxna)
+#	names(temp)[2] = yrs[i]
+#	surveymaxlat = merge(surveymaxlat, temp, all.x=TRUE)
+# minlon
+#	temp = aggregate(data$lon[inds], by = list(region = data$region[inds]), FUN = minna)
+#	names(temp)[2] = yrs[i]
+#	surveyminlon = merge(surveyminlon, temp, all.x=TRUE)
+# meanlon
+#	temp = aggregate(data$lon[inds], by = list(region = data$region[inds]), FUN = meanna)
+#	names(temp)[2] = yrs[i]
+#	surveymeanlon = merge(surveymeanlon, temp, all.x=TRUE)
+# maxlon
+#	temp = aggregate(data$lon[inds], by = list(region = data$region[inds]), FUN = maxna)
+#	names(temp)[2] = yrs[i]
+# surveymaxlon = merge(surveymaxlon, temp, all.x=TRUE)
+# mindepth
+# temp = aggregate(data$depth[inds], by = list(region = data$region[inds]), FUN = minna)
+# names(temp)[2] = yrs[i]
+# surveymindepth = merge(surveymindepth, temp, all.x=TRUE)
+# meandepth
+#	temp = aggregate(data$depth[inds], by = list(region = data$region[inds]), FUN = meanna)
+#	names(temp)[2] = yrs[i]
+#	surveymeandepth = merge(surveymeandepth, temp, all.x=TRUE)
+# maxdepth
+#	temp = aggregate(data$depth[inds], by = list(region = data$region[inds]), FUN = maxna)
+#	names(temp)[2] = yrs[i]
+#	surveymaxdepth = merge(surveymaxdepth, temp, all.x=TRUE)		
+# -- Alexa note: I didn't do the following lines, see note at end of this chunk
+# minjulian
+#	temp = aggregate(data$juliansurv[inds], by = list(region = data$region[inds]), FUN = minna)
+#	names(temp)[2] = yrs[i]
+#surveyminjulian = merge(surveyminjulian, temp, all.x=TRUE)
+# meanjulian
+#	temp = aggregate(data$juliansurv[inds], by = list(region = data$region[inds]), FUN = meanna)
+#	names(temp)[2] = yrs[i]
+# surveymeanjulian = merge(surveymeanjulian, temp, all.x=TRUE)
+# maxjulian
+#	temp = aggregate(data$juliansurv[inds], by = list(region = data$region[inds]), FUN = maxna)
+#	names(temp)[2] = yrs[i]
+# -- Picked back up again with the following: 
+# temp = aggregate(data$bottemp[inds], by = list(region = data$region[inds]), FUN = mean, na.rm=T)
+# names(temp)[2] = yrs[i]
+#	btmean = merge(btmean, temp, all.x=TRUE)
+# sd BT
+#	temp = aggregate(data$bottemp[inds], by = list(region = data$region[inds]), FUN = sd, na.rm=T)
+#	names(temp)[2] = yrs[i]
+#	btsd = merge(btsd, temp, all.x=TRUE)
+# -- Alexa note: I didn't do the following 2, I don't have SST in alldata 
+# mean SST
+#	temp = aggregate(data$surftemp[inds], by = list(region = data$region[inds]), FUN = mean, na.rm=T)
+#	names(temp)[2] = yrs[i]
+#	sstmean = merge(sstmean, temp, all.x=TRUE)
+# sd SST
+#	temp = aggregate(data$surftemp[inds], by = list(region = data$region[inds]), FUN = sd, na.rm=T)
+#	names(temp)[2] = yrs[i]
+#	sstsd = merge(sstsd, temp, all.x=TRUE)
+#	names(temp)[2] = yrs[i]
+
+
+# note that this is grouped by reg, year because the code above only mentions by = list(region = data$region[inds]) 
+  d_fullextent = alldata %>% 
+    group_by(reg, year)
+    mutate(
+      lat_min_full = minna(lat), 
+      lat_mean_full = meanna(lat),
+      lat_max_full = maxna(lat),
+      lon_min_full = minna(lon),
+      lon_mean_full = meanna(lon), 
+      lon_max_full = maxna(lon), 
+      depth_min_full = minna(depth),
+      depth_mean_full = meanna(depth),
+      depth_max_full = maxna(depth), 
+      julian_min_full = minna(julian),
+      julian_mean_full = meanna(julian),
+      julian_max_full = maxna(julian), 
+      btemp_mean_full = minna(btemp, na.rm=T), 
+      btemp_sd_full = sd(btemp, na.rm=T), 
+      
+    )
+
+--------
+
+#### BELOW I have commented out Malin's code and alternated it with my own that is attempting to replicate it. Some of Malin's code has been reordered or pulled from other sections to streamline the dplyr code. 
+
+# Doesn't calculate along-shelf distance, which may be more appropriate than lat
+# print warnings as they occur
+# options(warn=1)
 # Fill the matrices by year for mins, maxes, and moments (2nd, 3rd, 4th)". 
-
-length(yrs) #48 
-
-for(i in 1:length(yrs)){ # i = 1:length(yrs)[1] # i = 1
-
-  yr = yrs[i]
-  print(yr)
-  
-  # 1. unique by species for one year (still in loop, vs others outside for loop)
-  d_yr = alldata  %>%
-    filter(year == yr, wtcpue > 0) %>% # !is.na(alldata$lat), !is.na(alldata$wtcpue): same nrow()
-    group_by(regspecies) %>%
-    transmute(
-      year      = yr,
-      variable  = 'lat_minna',
-      value = minna(lat))
-
-  # 2.a. unique by species for all years, in tidy form (then rbind)
-  d_allyrs = alldata  %>%
-    filter(wtcpue > 0) %>% # !is.na(alldata$lat), !is.na(alldata$wtcpue): same nrow()
-    group_by(regspecies, year) %>%
-    transmute(
-      variable  = 'lat_minna',
-      value = minna(lat))
-
-  # 2.b. for next variable
-  d_allyrs = bind_rows(
-    d_allyrs,
-    alldata  %>%
-      filter(wtcpue > 0) %>% # !is.na(alldata$lat), !is.na(alldata$wtcpue): same nrow()
-      group_by(regspecies, year) %>%
-      transmute(
-        variable  = 'lat_maxna',
-        value = maxna(lat)))
-  
-  
-  # 3. unique by species for all years, in less tidy form (each var as a new column: most parsimonious! and works if all have same filter criteria)
-  d_allyrs = alldata  %>%
-    filter(wtcpue > 0) %>% # !is.na(alldata$lat), !is.na(alldata$wtcpue): same nrow()
-    group_by(regspecies, year) %>%
-    transmute(
-      lat_minna = minna(lat),
-      lat_maxna = maxna(lat))
-
-  # for next variable
-  d_allyrs = bind_rows(
-    d_allyrs,
-    alldata  %>%
-      filter(wtcpue > 0) %>% # !is.na(alldata$lat), !is.na(alldata$wtcpue): same nrow()
-      group_by(regspecies, year) %>%
-      transmute(
-        variable  = 'lat_maxna',
-        value = maxna(lat)))
-  
-  
-  # rbind all other values
-
-  
-	inds = alldata$year == yrs[i] 
-	inds2 = alldata$year == yrs[i] & !is.na(alldata$lat) & !is.na(alldata$wtcpue) # for lat calculations 
-	
-# Min lat
-	btemp = aggregate(alldata$lat[inds & alldata$wtcpue>0], by = list(regspecies = alldata$regspecies[inds & alldata$wtcpue>0]), FUN = minna)
-	  names(btemp)[2] = yrs[i]
-	minlat = merge(minlat, btemp, all.x=TRUE)
-
+# 	taxlist = alldata[!duplicated(alldata[,c('reg', 'spp')]), c('reg', 'spp')]
+# 		taxlist$regspp = paste(taxlist$reg, taxlist$spp, sep='_')
+#   minlat = data.frame(regspp = taxlist$regspp, reg=taxlist$reg, spp = taxlist$spp)
+# 
+# 	for(i in 1:length(yrs)){ # i = 1 
+# 
+# 
+# 	inds = alldata$year == yrs[i] 
+# 	inds2 = alldata$year == yrs[i] & !is.na(alldata$lat) & !is.na(alldata$wtcpue) # for lat calculations 
+# # Min lat
+# 		temp = aggregate(alldata$lat[inds & alldata$wtcpue>0], by = list(regspp = alldata$regspp[inds & alldata$wtcpue>0]), FUN = minna)
+# 			names(temp)[2] = yrs[i]
+# 		minlat = merge(minlat, temp, all.x=TRUE)
+# ALEXA: I think this is attempting to create a df with one column for unique region + species identifiers, and one column for the MINIMUM latitude at which that region + species identifier occurs IN THAT YEAR, excluding rows where wtcpue = 0. I can't actually get this code to run correctly, or the number of regspp to match what I get, so I'm just going to proceed by replicating what I think is the intent of the code. 
 # Max lat: only use lats where spp is present
-	temp = aggregate(alldata$lat[inds & alldata$wtcpue>0], by = list(regspecies = alldata$regspecies[inds & alldata$wtcpue>0]), FUN = maxna)
-	  names(temp)[2] = yrs[i]
-	maxlat = merge(maxlat, temp, all.x=TRUE)		
-		
-	# Center of biomass lat, by individual tows
-	temp = summarize(data[inds, c('lat', 'wtcpue')], by = list(regspp = data$regspp[inds]), FUN = wgtmean)
-		names(temp)[2] = yrs[i]
-	centbiolatindiv = merge(centbiolatindiv, temp, all.x=TRUE)
+# temp = aggregate(data$lat[inds & data$wtcpue>0], by = list(regspp = data$regspp[inds & data$wtcpue>0]), FUN = maxna)
+#	names(temp)[2] = yrs[i]
+#	maxlat = merge(maxlat, temp, all.x=TRUE)
+# Min lon
+#	temp = aggregate(data$lon[inds & data$wtcpue>0], by = list(regspp = data$regspp[inds & data$wtcpue>0]), FUN = minna)
+#	names(temp)[2] = yrs[i]
+#	minlon = merge(minlon, temp, all.x=TRUE)
+# Max lon
+#	temp = aggregate(data$lon[inds & data$wtcpue>0], by = list(regspp = data$regspp[inds & data$wtcpue>0]), FUN = maxna)
+#	names(temp)[2] = yrs[i]
+#	maxlon = merge(maxlon, temp, all.x=TRUE)
+# Min depth
+# temp = aggregate(data$depth[inds & data$wtcpue>0], by = list(regspp = data$regspp[inds & data$wtcpue>0]), FUN = minna)
+# names(temp)[2] = yrs[i]
+# mindepth = merge(mindepth, temp, all.x=TRUE)
+# Max depth
+#	temp = aggregate(data$depth[inds & data$wtcpue>0], by = list(regspp = data$regspp[inds & data$wtcpue>0]), FUN = maxna)
+#	names(temp)[2] = yrs[i]
+#	maxdepth = merge(maxdepth, temp, all.x=TRUE)
 
+
+
+# dplyr solution, not using a for loop, and calculating for all years simultaneously - the chunk below can translate any parts of Malin's for loop with the same filtering conditions. Note that for all of Malin's code, inds and inds2 are the same in alldata and not differentiated here: 
+# Note that the df this generates cannot be readily merged with the one above, because the code below filters out rows where wtcpue = 0. 
+
+  d_minmax = alldata %>%
+    filter(wtcpue > 0) %>% # !is.na(alldata$lat), !is.na(alldata$wtcpue): same nrow() # this is equivalent to alldata$wtcpue>0 
+    group_by(regspp, year) %>% # this is equivalent to by = list(regspp = alldata$regspp[inds & alldata$wtcpue>0])
+    mutate(
+      lat_minna = minna(lat), # equivalent to FUN = minna plus merging minlat and temp, except this is in tidy form 
+      lat_maxna = maxna(lat), # equivalent to FUN = maxma plus merging maxlat and temp, except this is in tidy form
+      lon_minna = minna(lon), # equivalent to FUN = minna plus merging minlon and temp, except this is in tidy form
+      lon_maxna = maxna(lon), # equivalent to FUN = maxna plus merging maxlon and temp, except this is in tidy form 
+      depth_minna = minna(depth), #equivalent to FUN = minna plus merging mindepth and temp, except this is in tidy form
+      depth_maxna = maxna(depth) #equivalent to FUN = maxna plus merging maxdepth and temp, except this is in tidy form
+      )
+	
+		
+
+# Outstanding issues / questions: 
+    
+# Malin separately calculated max, min, and mean for 'julian' and 'minutes since midnight'. Isn't that the same thing? Is one of them calculating length of *tow* (which I don't think is in alldata)? 
+# Where is SST and do I need it? 
+
+
+
+# Stopped at line 643
+    
+```
+
+# Centroid shift calculations 
+
+```{r calculate centroids}
 
 ```
 
